@@ -9,207 +9,430 @@
   let currentStep = 1;
   const TOTAL_STEPS = 5;
 
-  /* ── DOM refs ───────────────────────────────────────────── */
-  const form        = document.getElementById('buyer-form');
-  const nextBtn     = document.getElementById('next-btn');
-  const prevBtn     = document.getElementById('prev-btn');
-  const submitBtn   = document.getElementById('submit-btn');
-  const progressFill= document.getElementById('progress-fill');
-  const successState= document.getElementById('success-state');
-  const summaryCard = document.getElementById('summary-card');
-  const summaryContent = document.getElementById('summary-content');
-  const formNav     = document.getElementById('form-nav');
+  /* ── Validators ─────────────────────────────────────────── */
+  const VALIDATORS = {
+    email: {
+      re:  /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/,
+      msg: 'Please enter a valid email address (e.g. jane@example.com).'
+    },
+    phone: {
+      // Accepts (555) 555-5555 · 555-555-5555 · 5555555555 · +1 555 555 5555 etc.
+      re:  /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]{7,14}$/,
+      msg: 'Please enter a valid US phone number (e.g. 555-555-5555).'
+    },
+    address: {
+      re:     /\d/,      // must contain at least one digit (street number)
+      minLen: 10,
+      msg:    'Please enter a full street address including number and city (e.g. 123 Main St, Milwaukee, WI).'
+    }
+  };
 
-  /* ── Smooth scroll helper ───────────────────────────────── */
-  function scrollToForm() {
-    const formSection = document.getElementById('form-section');
-    if (formSection) {
-      formSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  /* ── DOM refs ───────────────────────────────────────────── */
+  const form           = document.getElementById('buyer-form');
+  const nextBtn        = document.getElementById('next-btn');
+  const prevBtn        = document.getElementById('prev-btn');
+  const submitBtn      = document.getElementById('submit-btn');
+  const progressFill   = document.getElementById('progress-fill');
+  const successState   = document.getElementById('success-state');
+  const summaryCard    = document.getElementById('summary-card');
+  const summaryContent = document.getElementById('summary-content');
+  const formNav        = document.getElementById('form-nav');
+
+  /* ─────────────────────────────────────────────────────────
+     ADDRESS AUTOCOMPLETE (OpenStreetMap Nominatim — free, no key)
+  ───────────────────────────────────────────────────────── */
+  (function initAddressAutocomplete() {
+    const input    = document.getElementById('current-address');
+    const dropdown = document.getElementById('address-dropdown');
+    if (!input || !dropdown) return;
+
+    let debounceTimer  = null;
+    let activeIndex    = -1;
+    let currentResults = [];
+
+    function openDropdown() {
+      dropdown.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+    }
+    function closeDropdown() {
+      dropdown.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      activeIndex = -1;
+    }
+
+    function setActive(idx) {
+      const items = dropdown.querySelectorAll('.autocomplete-item');
+      items.forEach((el, i) => {
+        el.classList.toggle('autocomplete-item--active', i === idx);
+        el.setAttribute('aria-selected', i === idx);
+      });
+      activeIndex = idx;
+    }
+
+    function renderResults(results) {
+      dropdown.innerHTML = '';
+      currentResults = results;
+
+      if (!results.length) {
+        closeDropdown();
+        return;
+      }
+
+      results.forEach((r, i) => {
+        const parts       = r.display_name.split(', ');
+        const mainLine    = parts.slice(0, 2).join(', ');
+        const subLine     = parts.slice(2).join(', ');
+
+        const item = document.createElement('div');
+        item.className   = 'autocomplete-item';
+        item.setAttribute('role', 'option');
+        item.setAttribute('aria-selected', 'false');
+        item.setAttribute('tabindex', '-1');
+        item.innerHTML = `
+          <span class="autocomplete-item__icon">📍</span>
+          <div>
+            <div class="autocomplete-item__main">${mainLine}</div>
+            ${subLine ? `<div class="autocomplete-item__sub">${subLine}</div>` : ''}
+          </div>
+        `;
+
+        item.addEventListener('mousedown', (e) => {
+          // mousedown fires before blur — prevent input losing focus before we fill it
+          e.preventDefault();
+          selectResult(r);
+        });
+
+        dropdown.appendChild(item);
+      });
+
+      openDropdown();
+    }
+
+    function selectResult(r) {
+      // Build a clean US-style address string
+      const a    = r.address || {};
+      const num  = a.house_number || '';
+      const road = a.road || a.pedestrian || '';
+      const city = a.city || a.town || a.village || a.hamlet || '';
+      const state= a.state || '';
+      const zip  = a.postcode || '';
+
+      let filled = r.display_name;
+      if (num && road) {
+        filled = [
+          `${num} ${road}`,
+          city,
+          state,
+          zip
+        ].filter(Boolean).join(', ');
+      }
+
+      input.value = filled;
+      closeDropdown();
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+    }
+
+    async function fetchSuggestions(query) {
+      dropdown.innerHTML = `
+        <div class="autocomplete-loading">
+          <div class="autocomplete-spinner"></div>
+          Looking up addresses…
+        </div>`;
+      openDropdown();
+
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?` +
+          new URLSearchParams({
+            q:              query,
+            format:         'json',
+            limit:          '6',
+            countrycodes:   'us',
+            addressdetails: '1',
+            featuretype:    'house'
+          });
+
+        const res  = await fetch(url, {
+          headers: { 'Accept-Language': 'en-US,en;q=0.9' }
+        });
+        const data = await res.json();
+        renderResults(data);
+      } catch {
+        closeDropdown();
+      }
+    }
+
+    // Keyboard navigation inside dropdown
+    input.addEventListener('keydown', (e) => {
+      if (dropdown.hidden) return;
+      const items = dropdown.querySelectorAll('.autocomplete-item');
+      if (!items.length) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActive(Math.min(activeIndex + 1, items.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActive(Math.max(activeIndex - 1, 0));
+      } else if (e.key === 'Enter' && activeIndex >= 0) {
+        e.preventDefault();
+        selectResult(currentResults[activeIndex]);
+      } else if (e.key === 'Escape') {
+        closeDropdown();
+      }
+    });
+
+    input.addEventListener('input', () => {
+      const q = input.value.trim();
+      clearTimeout(debounceTimer);
+      if (q.length < 4) { closeDropdown(); return; }
+      debounceTimer = setTimeout(() => fetchSuggestions(q), 320);
+    });
+
+    // Close when focus leaves the whole autocomplete widget
+    input.addEventListener('blur', () => {
+      setTimeout(closeDropdown, 150); // small delay so mousedown can fire first
+    });
+
+    // Reopen on re-focus if text exists
+    input.addEventListener('focus', () => {
+      if (currentResults.length && input.value.trim().length >= 4) {
+        renderResults(currentResults);
+      }
+    });
+
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.autocomplete-wrap')) closeDropdown();
+    });
+  })();
+
+  /* ─────────────────────────────────────────────────────────
+     BUTTON GATING
+  ───────────────────────────────────────────────────────── */
+  function setActionEnabled(enabled) {
+    // Operates on whichever action button is currently visible
+    const btn = currentStep === TOTAL_STEPS ? submitBtn : nextBtn;
+    btn.disabled = !enabled;
+    btn.classList.toggle('btn--disabled', !enabled);
+    btn.setAttribute('aria-disabled', String(!enabled));
+  }
+
+  function isStepComplete(step) {
+    const stepEl = document.getElementById('step-' + step);
+    if (!stepEl) return false;
+
+    const val      = (id) => (document.getElementById(id)?.value ?? '').trim();
+    const radio    = (name) => !!stepEl.querySelector(`input[name="${name}"]:checked`);
+    const anyCheck = (name) => stepEl.querySelectorAll(`input[name="${name}"]:checked`).length > 0;
+
+    switch (step) {
+      case 1:
+        return (
+          val('first-name') !== '' &&
+          val('last-name')  !== '' &&
+          VALIDATORS.email.re.test(val('email')) &&
+          VALIDATORS.phone.re.test(val('phone')) &&
+          radio('preferredContact') &&
+          radio('timeline')
+        );
+      case 2: {
+        const addr = val('current-address');
+        return (
+          addr.length >= VALIDATORS.address.minLen &&
+          VALIDATORS.address.re.test(addr) &&
+          radio('rentOrOwn')
+        );
+      }
+      case 3: {
+        const countyChecked = stepEl.querySelectorAll('input[name="location"]:checked').length > 0;
+        return (
+          anyCheck('homeType') &&
+          (countyChecked || val('location-other') !== '') &&
+          radio('bedrooms') &&
+          radio('bathrooms')
+        );
+      }
+      case 4:
+        return (
+          Number(document.getElementById('price-range')?.value) > 0 &&
+          Number(document.getElementById('monthly-budget')?.value) > 0 &&
+          radio('preApproved')
+        );
+      case 5:
+        return radio('heardAbout');
+      default:
+        return true;
     }
   }
 
-  /* ── Start button ───────────────────────────────────────── */
-  const startBtn = document.getElementById('start-btn');
-  if (startBtn) {
-    startBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      scrollToForm();
-    });
+  function refreshButton() {
+    setActionEnabled(isStepComplete(currentStep));
   }
 
-  /* ── Progress update ────────────────────────────────────── */
+  /* ─────────────────────────────────────────────────────────
+     PROGRESS BAR
+  ───────────────────────────────────────────────────────── */
   function updateProgress(step) {
-    const pct = Math.round((step / TOTAL_STEPS) * 100);
-    progressFill.style.width = pct + '%';
-
+    progressFill.style.width = Math.round((step / TOTAL_STEPS) * 100) + '%';
     document.querySelectorAll('.step-item').forEach((el) => {
       const s = parseInt(el.dataset.step, 10);
       el.classList.remove('step-item--active', 'step-item--done');
       el.removeAttribute('aria-current');
+      const circle = el.querySelector('.step-circle');
       if (s === step) {
         el.classList.add('step-item--active');
         el.setAttribute('aria-current', 'step');
+        circle.textContent = s;
       } else if (s < step) {
         el.classList.add('step-item--done');
-        // Checkmark in done circles
-        el.querySelector('.step-circle').textContent = '✓';
+        circle.textContent = '✓';
       } else {
-        el.querySelector('.step-circle').textContent = s;
+        circle.textContent = s;
       }
     });
   }
 
-  /* ── Show / hide steps ──────────────────────────────────── */
+  /* ─────────────────────────────────────────────────────────
+     STEP NAVIGATION
+  ───────────────────────────────────────────────────────── */
   function goToStep(step) {
-    const current = document.getElementById('step-' + currentStep);
-    const next    = document.getElementById('step-' + step);
-
-    if (current) current.hidden = true;
-    if (next)    next.hidden    = false;
-
+    document.getElementById('step-' + currentStep).hidden = true;
+    document.getElementById('step-' + step).hidden        = false;
     currentStep = step;
+
     updateProgress(step);
 
-    // Button states
+    // Button visibility: Continue on 1-4, Submit on 5 only
     prevBtn.hidden   = step === 1;
     nextBtn.hidden   = step === TOTAL_STEPS;
     submitBtn.hidden = step !== TOTAL_STEPS;
 
-    // Show summary on final step
     if (step === TOTAL_STEPS) buildSummary();
 
-    scrollToForm();
+    refreshButton();
+    document.getElementById('form-section')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  /* ── Validation ─────────────────────────────────────────── */
-  function clearErrors(stepEl) {
-    stepEl.querySelectorAll('.field-error').forEach(el => el.textContent = '');
-    stepEl.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
+  /* ─────────────────────────────────────────────────────────
+     FULL STEP VALIDATION  (on Next / Submit click)
+  ───────────────────────────────────────────────────────── */
+  function setError(inputEl, errEl, msg) {
+    if (inputEl) inputEl.classList.add('error');
+    if (errEl)   errEl.textContent = msg;
   }
 
-  function showError(el, msg) {
-    el.textContent = msg;
+  function clearError(inputEl, errEl) {
+    if (inputEl) inputEl.classList.remove('error');
+    if (errEl)   errEl.textContent = '';
   }
 
   function validateStep(step) {
-    const stepEl = document.getElementById('step-' + step);
-    clearErrors(stepEl);
-    let valid = true;
+    const stepEl     = document.getElementById('step-' + step);
+    let valid        = true;
+    let firstErrEl   = null;
 
-    const require = (id, errorId, msg) => {
-      const input = document.getElementById(id);
-      const errEl = document.getElementById(errorId) ||
-                    input?.parentElement?.querySelector('.field-error');
-      if (!input || !input.value.trim()) {
-        if (input) input.classList.add('error');
-        if (errEl) showError(errEl, msg);
-        if (!valid) return; // already scrolled
-        valid = false;
-      }
+    const fail = (inputEl, errId, msg) => {
+      const errEl = errId
+        ? document.getElementById(errId)
+        : inputEl?.closest('.field-group')?.querySelector('.field-error');
+      setError(inputEl, errEl, msg);
+      if (!firstErrEl) firstErrEl = errEl || inputEl;
+      valid = false;
     };
 
-    const requireRadio = (name, errorId, msg) => {
-      const checked = stepEl.querySelector(`input[name="${name}"]:checked`);
-      const errEl   = document.getElementById(errorId);
-      if (!checked) {
-        if (errEl) showError(errEl, msg);
-        valid = false;
-      }
+    const requireText  = (id, msg) => {
+      const el = document.getElementById(id);
+      if (!el || !el.value.trim()) fail(el, null, msg);
     };
-
-    const requireCheckboxGroup = (name, errorId, msg) => {
-      const checked = stepEl.querySelectorAll(`input[name="${name}"]:checked`);
-      const errEl   = document.getElementById(errorId);
-      if (checked.length === 0) {
-        if (errEl) showError(errEl, msg);
-        valid = false;
-      }
+    const requireRadio = (name, errId, msg) => {
+      if (!stepEl.querySelector(`input[name="${name}"]:checked`)) fail(null, errId, msg);
+    };
+    const requireCheck = (name, errId, msg) => {
+      if (!stepEl.querySelectorAll(`input[name="${name}"]:checked`).length) fail(null, errId, msg);
     };
 
     switch (step) {
-      case 1:
-        require('first-name',  null, 'First name is required.');
-        require('last-name',   null, 'Last name is required.');
-        require('email',       null, 'Email address is required.');
-        require('phone',       null, 'Phone number is required.');
-        requireRadio('preferredContact', 'contact-method-error', 'Please choose a contact method.');
-        requireRadio('timeline',         'timeline-error',        'Please select a timeline.');
-        // Email format
-        const emailEl = document.getElementById('email');
-        if (emailEl && emailEl.value && !emailEl.validity.valid) {
-          emailEl.classList.add('error');
-          const errEl = emailEl.parentElement.querySelector('.field-error');
-          if (errEl) showError(errEl, 'Please enter a valid email address.');
-          valid = false;
-        }
-        break;
+      case 1: {
+        requireText('first-name', 'First name is required.');
+        requireText('last-name',  'Last name is required.');
 
-      case 2:
-        require('current-address', null, 'Current address is required.');
-        requireRadio('rentOrOwn', 'rent-own-error', 'Please select rent or own.');
-        break;
+        const emailEl  = document.getElementById('email');
+        const emailErr = emailEl?.closest('.field-group')?.querySelector('.field-error');
+        if (!emailEl?.value.trim())                               fail(emailEl, null, 'Email address is required.');
+        else if (!VALIDATORS.email.re.test(emailEl.value.trim())) fail(emailEl, null, VALIDATORS.email.msg);
+        else clearError(emailEl, emailErr);
 
-      case 3:
-        requireCheckboxGroup('homeType', 'home-type-error', 'Please select at least one home type.');
-        // Location: either a county checked or other filled
+        const phoneEl  = document.getElementById('phone');
+        const phoneErr = phoneEl?.closest('.field-group')?.querySelector('.field-error');
+        if (!phoneEl?.value.trim())                               fail(phoneEl, null, 'Phone number is required.');
+        else if (!VALIDATORS.phone.re.test(phoneEl.value.trim())) fail(phoneEl, null, VALIDATORS.phone.msg);
+        else clearError(phoneEl, phoneErr);
+
+        requireRadio('preferredContact', 'contact-method-error', 'Please choose a preferred contact method.');
+        requireRadio('timeline',         'timeline-error',        'Please select your purchase timeline.');
+        break;
+      }
+      case 2: {
+        const addrEl  = document.getElementById('current-address');
+        const addrErr = addrEl?.closest('.field-group')?.querySelector('.field-error');
+        const addrVal = addrEl?.value.trim() ?? '';
+        if (!addrVal)                                                                              fail(addrEl, null, 'Current address is required.');
+        else if (addrVal.length < VALIDATORS.address.minLen || !VALIDATORS.address.re.test(addrVal)) fail(addrEl, null, VALIDATORS.address.msg);
+        else clearError(addrEl, addrErr);
+        requireRadio('rentOrOwn', 'rent-own-error', 'Please select whether you rent or own.');
+        break;
+      }
+      case 3: {
+        requireCheck('homeType', 'home-type-error', 'Please select at least one home type.');
         const countyChecked = stepEl.querySelectorAll('input[name="location"]:checked').length > 0;
-        const otherLoc = document.getElementById('location-other')?.value.trim();
-        if (!countyChecked && !otherLoc) {
-          showError(document.getElementById('location-error'), 'Please select at least one location or enter a specific area.');
-          valid = false;
-        }
-        requireRadio('bedrooms',  'bedrooms-error',  'Please select a bedroom minimum.');
-        requireRadio('bathrooms', 'bathrooms-error', 'Please select a bathroom minimum.');
+        const otherLoc      = document.getElementById('location-other')?.value.trim();
+        if (!countyChecked && !otherLoc) fail(null, 'location-error', 'Please select at least one county or enter a specific area.');
+        requireRadio('bedrooms',  'bedrooms-error',  'Please select a minimum number of bedrooms.');
+        requireRadio('bathrooms', 'bathrooms-error', 'Please select a minimum number of bathrooms.');
         break;
+      }
+      case 4: {
+        const priceEl  = document.getElementById('price-range');
+        const priceErr = priceEl?.closest('.field-group')?.querySelector('.field-error');
+        if (!priceEl?.value || Number(priceEl.value) <= 0) fail(priceEl, null, 'Please enter a valid price (numbers only, e.g. 450000).');
+        else clearError(priceEl, priceErr);
 
-      case 4:
-        require('price-range',    null, 'Please enter your ideal price range.');
-        require('monthly-budget', null, 'Please enter your monthly budget.');
-        requireRadio('preApproved', 'preapproved-error', 'Please indicate if you are pre-approved.');
+        const budgetEl  = document.getElementById('monthly-budget');
+        const budgetErr = budgetEl?.closest('.field-group')?.querySelector('.field-error');
+        if (!budgetEl?.value || Number(budgetEl.value) <= 0) fail(budgetEl, null, 'Please enter a valid monthly budget (numbers only, e.g. 2200).');
+        else clearError(budgetEl, budgetErr);
+
+        requireRadio('preApproved', 'preapproved-error', 'Please indicate whether you are pre-approved.');
         break;
-
-      case 5:
+      }
+      case 5: {
         requireRadio('heardAbout', 'heard-about-error', 'Please tell us how you heard about us.');
-        // If "other" radio is selected, require the text field
         const otherRadio = document.getElementById('hear-other');
-        if (otherRadio?.checked) {
-          const otherText = document.getElementById('hear-other-text')?.value.trim();
-          if (!otherText) {
-            const errEl = document.getElementById('heard-about-error');
-            if (errEl) showError(errEl, 'Please specify how you heard about us.');
-            valid = false;
-          }
+        if (otherRadio?.checked && !document.getElementById('hear-other-text')?.value.trim()) {
+          fail(null, 'heard-about-error', 'Please specify how you heard about us.');
         }
         break;
+      }
     }
 
-    // Scroll to first error
-    if (!valid) {
-      const firstErr = stepEl.querySelector('.field-error:not(:empty), .error');
-      if (firstErr) firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-
+    if (firstErrEl) firstErrEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return valid;
   }
 
-  /* ── Conditional fields ─────────────────────────────────── */
+  /* ─────────────────────────────────────────────────────────
+     CONDITIONAL FIELDS
+  ───────────────────────────────────────────────────────── */
   function setupConditionals() {
-    // Pre-approved toggle
     document.querySelectorAll('input[name="preApproved"]').forEach((radio) => {
       radio.addEventListener('change', () => {
-        const lenderGroup     = document.getElementById('lender-group');
-        const needLenderGroup = document.getElementById('need-lender-group');
-        if (radio.value === 'Yes' && radio.checked) {
-          lenderGroup.hidden     = false;
-          needLenderGroup.hidden = true;
-        } else if (radio.value === 'No' && radio.checked) {
-          lenderGroup.hidden     = true;
-          needLenderGroup.hidden = false;
-        }
+        document.getElementById('lender-group').hidden      = radio.value !== 'Yes';
+        document.getElementById('need-lender-group').hidden = radio.value !== 'No';
+        refreshButton();
       });
     });
 
-    // "Other" for heard-about — focus the text input when selected
     const hearOtherRadio = document.getElementById('hear-other');
     const hearOtherText  = document.getElementById('hear-other-text');
     if (hearOtherRadio && hearOtherText) {
@@ -218,76 +441,75 @@
       });
       hearOtherText.addEventListener('click', () => {
         hearOtherRadio.checked = true;
+        refreshButton();
       });
     }
   }
 
-  /* ── Summary builder ────────────────────────────────────── */
+  /* ─────────────────────────────────────────────────────────
+     SUMMARY CARD (step 5 review)
+  ───────────────────────────────────────────────────────── */
   function getVal(name, multi = false) {
     if (multi) {
-      const checked = document.querySelectorAll(`input[name="${name}"]:checked`);
-      return Array.from(checked).map(c => c.value).join(', ') || '—';
+      return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`))
+        .map(c => c.value).join(', ') || '—';
     }
     const el = document.querySelector(`input[name="${name}"]:checked`) ||
                document.querySelector(`[name="${name}"]`);
-    return el ? (el.value || '—') : '—';
+    return el?.value || '—';
   }
 
   function buildSummary() {
+    const v = (id) => document.getElementById(id)?.value || '—';
     const items = [
-      { key: 'Name',            val: [document.getElementById('first-name')?.value, document.getElementById('last-name')?.value].filter(Boolean).join(' ') || '—' },
-      { key: 'Email',           val: document.getElementById('email')?.value || '—' },
-      { key: 'Phone',           val: document.getElementById('phone')?.value || '—' },
+      { key: 'Name',            val: [v('first-name'), v('last-name')].filter(s => s !== '—').join(' ') || '—' },
+      { key: 'Email',           val: v('email') },
+      { key: 'Phone',           val: v('phone') },
       { key: 'Contact Pref.',   val: getVal('preferredContact') },
       { key: 'Timeline',        val: getVal('timeline') },
-      { key: 'Current Address', val: document.getElementById('current-address')?.value || '—' },
+      { key: 'Current Address', val: v('current-address') },
       { key: 'Rent / Own',      val: getVal('rentOrOwn') },
       { key: 'Home Type(s)',    val: getVal('homeType', true) },
-      { key: 'Location(s)',     val: [getVal('location', true), document.getElementById('location-other')?.value].filter(v => v && v !== '—').join(', ') || '—' },
+      { key: 'Location(s)',     val: [getVal('location', true), v('location-other')].filter(s => s && s !== '—').join(', ') || '—' },
       { key: 'Bedrooms',        val: getVal('bedrooms') },
       { key: 'Bathrooms',       val: getVal('bathrooms') },
-      { key: 'Home Style(s)',   val: getVal('homeStyle', true) },
-      { key: 'Price Range',     val: document.getElementById('price-range')?.value || '—' },
-      { key: 'Monthly Budget',  val: document.getElementById('monthly-budget')?.value || '—' },
+      { key: 'Home Style(s)',   val: getVal('homeStyle', true) || '—' },
+      { key: 'Price Range',     val: v('price-range') },
+      { key: 'Monthly Budget',  val: v('monthly-budget') },
       { key: 'Pre-Approved',    val: getVal('preApproved') },
     ];
 
-    summaryContent.innerHTML = items.map(item => `
+    summaryContent.innerHTML = items.map(i => `
       <div class="summary-item">
-        <div class="summary-item__key">${item.key}</div>
-        <div class="summary-item__val">${item.val}</div>
-      </div>
-    `).join('');
+        <div class="summary-item__key">${i.key}</div>
+        <div class="summary-item__val">${i.val}</div>
+      </div>`).join('');
 
     summaryCard.hidden = false;
   }
 
-  /* ── Form submission ────────────────────────────────────── */
+  /* ─────────────────────────────────────────────────────────
+     FORM SUBMIT
+  ───────────────────────────────────────────────────────── */
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     if (!validateStep(5)) return;
 
-    // Collect all data
-    const data = new FormData(form);
     const payload = {};
-    for (const [key, value] of data.entries()) {
-      if (payload[key]) {
-        payload[key] = [].concat(payload[key], value);
-      } else {
-        payload[key] = value;
-      }
+    for (const [k, v] of new FormData(form).entries()) {
+      payload[k] = payload[k] ? [].concat(payload[k], v) : v;
     }
-
     console.log('Buyer Profile Submitted:', payload);
 
-    // Hide form, show success
     form.hidden    = true;
     formNav.hidden = true;
     successState.hidden = false;
     successState.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
-  /* ── Next / Prev ────────────────────────────────────────── */
+  /* ─────────────────────────────────────────────────────────
+     NEXT / PREV BUTTONS
+  ───────────────────────────────────────────────────────── */
   nextBtn.addEventListener('click', () => {
     if (!validateStep(currentStep)) return;
     if (currentStep < TOTAL_STEPS) goToStep(currentStep + 1);
@@ -297,17 +519,54 @@
     if (currentStep > 1) goToStep(currentStep - 1);
   });
 
-  /* ── Init ───────────────────────────────────────────────── */
+  /* ─────────────────────────────────────────────────────────
+     REAL-TIME EVENTS
+  ───────────────────────────────────────────────────────── */
+  form.addEventListener('input',  () => refreshButton());
+  form.addEventListener('change', () => refreshButton());
+
+  // Clear inline error on the field being corrected
+  form.addEventListener('input', (e) => {
+    const t = e.target;
+    t.classList.remove('error');
+    const err = t.closest('.field-group')?.querySelector('.field-error');
+    if (err) err.textContent = '';
+  });
+
+  // Blur-time format validation for specific fields
+  ['email', 'phone', 'current-address'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('blur', function () {
+      const val    = this.value.trim();
+      const errEl  = this.closest('.field-group')?.querySelector('.field-error');
+      clearError(this, errEl);
+      if (!val) return;
+      if (id === 'email'           && !VALIDATORS.email.re.test(val))   setError(this, errEl, VALIDATORS.email.msg);
+      if (id === 'phone'           && !VALIDATORS.phone.re.test(val))   setError(this, errEl, VALIDATORS.phone.msg);
+      if (id === 'current-address' && (val.length < VALIDATORS.address.minLen || !VALIDATORS.address.re.test(val)))
+        setError(this, errEl, VALIDATORS.address.msg);
+      refreshButton();
+    });
+  });
+
+  /* ─────────────────────────────────────────────────────────
+     START BUTTON
+  ───────────────────────────────────────────────────────── */
+  document.getElementById('start-btn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('form-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  /* ─────────────────────────────────────────────────────────
+     INIT
+  ───────────────────────────────────────────────────────── */
   setupConditionals();
   updateProgress(1);
 
-  // Real-time error clear on input
-  form.addEventListener('input', (e) => {
-    const target = e.target;
-    target.classList.remove('error');
-    const err = target.closest('.field-group, .field-fieldset')
-                      ?.querySelector('.field-error');
-    if (err) err.textContent = '';
-  });
+  // Ensure correct initial button visibility
+  nextBtn.hidden   = false;   // step 1 — show Continue
+  submitBtn.hidden = true;    // step 1 — hide Submit
+  prevBtn.hidden   = true;    // step 1 — hide Back
+
+  refreshButton(); // Start disabled until step 1 is complete
 
 })();

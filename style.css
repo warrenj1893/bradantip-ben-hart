@@ -125,6 +125,16 @@ fieldset { border: none; }
   color: var(--text);
 }
 
+/* Disabled state */
+.btn--disabled,
+.btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
 /* ============================================================
    NAV
 ============================================================ */
@@ -201,20 +211,25 @@ fieldset { border: none; }
   align-items: center;
   gap: 20px;
   flex-shrink: 0;
-  min-width: 220px;
+  min-width: 260px;
 }
 
 .hero__agent-photo-wrap {
   position: relative;
 }
 .hero__agent-photo {
-  width: 160px;
-  height: 160px;
+  width: 240px;
+  height: 240px;
   border-radius: 50%;
   object-fit: cover;
   object-position: center top;
-  border: 4px solid var(--gold);
-  box-shadow: 0 0 0 8px rgba(201,168,76,.15), var(--shadow-lg);
+  border: 5px solid var(--gold);
+  box-shadow: 0 0 0 10px rgba(201,168,76,.18), 0 0 0 18px rgba(201,168,76,.07), var(--shadow-lg);
+  transition: transform 0.4s ease, box-shadow 0.4s ease;
+}
+.hero__agent-photo:hover {
+  transform: scale(1.03);
+  box-shadow: 0 0 0 12px rgba(201,168,76,.22), 0 0 0 22px rgba(201,168,76,.08), var(--shadow-lg);
 }
 .hero__compass-badge {
   position: absolute;
@@ -625,6 +640,80 @@ fieldset { border: none; }
 .field-textarea { resize: vertical; min-height: 110px; }
 .field-fieldset { min-width: 0; }
 
+/* Address autocomplete dropdown */
+.autocomplete-wrap {
+  position: relative;
+}
+.autocomplete-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--white);
+  border: 2px solid var(--gold);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  max-height: 280px;
+  overflow-y: auto;
+  animation: dropdownIn 0.18s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes dropdownIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.autocomplete-dropdown[hidden] { display: none; }
+.autocomplete-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--gray-100);
+  transition: background var(--transition);
+  font-size: 0.9rem;
+  color: var(--text);
+  line-height: 1.4;
+}
+.autocomplete-item:last-child { border-bottom: none; }
+.autocomplete-item:hover,
+.autocomplete-item.autocomplete-item--active {
+  background: rgba(201,168,76,.07);
+}
+.autocomplete-item__icon {
+  font-size: 1rem;
+  margin-top: 1px;
+  flex-shrink: 0;
+  color: var(--gold-dark);
+}
+.autocomplete-item__main {
+  font-weight: 600;
+  color: var(--navy);
+}
+.autocomplete-item__sub {
+  font-size: 0.8rem;
+  color: var(--text-soft);
+  margin-top: 1px;
+}
+.autocomplete-loading {
+  padding: 14px 16px;
+  font-size: 0.875rem;
+  color: var(--text-soft);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.autocomplete-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--gray-200);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .field-error {
   display: block;
   font-size: 0.8rem;
@@ -633,6 +722,30 @@ fieldset { border: none; }
   min-height: 18px;
   font-weight: 500;
 }
+
+/* Currency / prefix input */
+.field-prefix-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.field-prefix {
+  position: absolute;
+  left: 14px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-soft);
+  pointer-events: none;
+  z-index: 1;
+  line-height: 1;
+}
+.field-input--prefixed {
+  padding-left: 28px;
+}
+/* Remove browser number spinners */
+.field-input[type="number"]::-webkit-inner-spin-button,
+.field-input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.field-input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 
 /* Choice cards */
 .choice-group { display: flex; gap: 10px; flex-wrap: wrap; }
