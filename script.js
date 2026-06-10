@@ -10,7 +10,7 @@
   const TOTAL_STEPS = 5;
 
   // TODO: Paste your Google Apps Script Web App URL here:
-  const GOOGLE_APP_SCRIPT_URL = "";
+  const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzTzFB-L9FYBEZUGdZuF_Oa1TSAK8gp8sPFID7SUz2MsmRUY_4jw-_V0ycbTLw08SmC/exec";
 
   /* ── Validators ─────────────────────────────────────────── */
   const VALIDATORS = {
