@@ -9,6 +9,9 @@
   let currentStep = 1;
   const TOTAL_STEPS = 5;
 
+  // TODO: Paste your Google Apps Script Web App URL here:
+  const GOOGLE_APP_SCRIPT_URL = "";
+
   /* ── Validators ─────────────────────────────────────────── */
   const VALIDATORS = {
     email: {
@@ -259,8 +262,14 @@
           Number(document.getElementById('monthly-budget')?.value) > 0 &&
           radio('preApproved')
         );
-      case 5:
-        return radio('heardAbout');
+      case 5: {
+        const heard = radio('heardAbout');
+        const other = document.getElementById('hear-other');
+        if (other && other.checked) {
+          return val('hear-other-text') !== '';
+        }
+        return heard;
+      }
       default:
         return true;
     }
@@ -491,20 +500,54 @@
   /* ─────────────────────────────────────────────────────────
      FORM SUBMIT
   ───────────────────────────────────────────────────────── */
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!validateStep(5)) return;
 
+    // Collect all data into a clean object
     const payload = {};
     for (const [k, v] of new FormData(form).entries()) {
-      payload[k] = payload[k] ? [].concat(payload[k], v) : v;
+      payload[k] = payload[k] ? [].concat(payload[k], v).join(', ') : v;
     }
-    console.log('Buyer Profile Submitted:', payload);
+    
+    // Custom handling for checkboxes/arrays that FormData handles oddly
+    payload.homeType = getVal('homeType', true);
+    payload.location = getVal('location', true);
 
-    form.hidden    = true;
-    formNav.hidden = true;
-    successState.hidden = false;
-    successState.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Disable button and show loading state
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = 'Submitting...';
+    submitBtn.disabled = true;
+    submitBtn.classList.add('btn--disabled');
+
+    try {
+      if (GOOGLE_APP_SCRIPT_URL) {
+        // We use text/plain to avoid CORS preflight issues with Google Apps Script
+        await fetch(GOOGLE_APP_SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8',
+          }
+        });
+      } else {
+        console.warn('No GOOGLE_APP_SCRIPT_URL provided. Simulating submission.');
+        await new Promise(r => setTimeout(r, 1200));
+        console.log('Buyer Profile Submitted (Local Simulation):', payload);
+      }
+
+      form.hidden    = true;
+      formNav.hidden = true;
+      successState.hidden = false;
+      successState.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    } catch (err) {
+      console.error('Error submitting form:', err);
+      alert('There was a problem submitting your form. Please try again or contact Ben directly.');
+      submitBtn.innerHTML = originalText;
+      submitBtn.disabled = false;
+      submitBtn.classList.remove('btn--disabled');
+    }
   });
 
   /* ─────────────────────────────────────────────────────────
